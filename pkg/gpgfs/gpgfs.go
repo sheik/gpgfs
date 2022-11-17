@@ -27,6 +27,17 @@ type GPGRoot struct {
 	passPhrase []byte
 }
 
+func (r *GPGRoot) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	fmt.Println("GPGRoot.Mkdir called:", name, mode)
+	node := r.NewInode(ctx, &fs.Inode{}, fs.StableAttr{Mode: fuse.S_IFDIR})
+	r.AddChild(name, node, true)
+	err := os.Mkdir("vault/"+name, 0755)
+	if err != nil {
+		fmt.Println("error creating directory:", err)
+	}
+	return node, fs.ToErrno(err)
+}
+
 func (r *GPGRoot) Unlink(ctx context.Context, name string) syscall.Errno {
 	fmt.Println("UNLINK CALLED:", name)
 	err := os.Remove("vault/" + name)
@@ -90,6 +101,21 @@ type GPGFile struct {
 	root *GPGRoot
 }
 
+func (file *GPGFile) Flush(ctx context.Context, f fs.FileHandle) syscall.Errno {
+	fmt.Println("GPGFile.Flush called")
+	encrypted, err := helper.EncryptMessageArmored(string(file.root.pubKey), string(file.data))
+	if err != nil {
+		fmt.Println("error writing file:", err)
+		return fs.ToErrno(err)
+	}
+	err = os.WriteFile(file.file, []byte(encrypted), 0644)
+	if err != nil {
+		fmt.Println("error writing file:", err)
+		return fs.ToErrno(err)
+	}
+	return fuse.F_OK
+}
+
 func (file *GPGFile) Unlink(ctx context.Context, name string) syscall.Errno {
 	fmt.Println("UNLINK CALLED:", name)
 	return fuse.F_OK
@@ -97,21 +123,23 @@ func (file *GPGFile) Unlink(ctx context.Context, name string) syscall.Errno {
 
 func (file *GPGFile) Write(ctx context.Context, f fs.FileHandle, data []byte, off int64) (written uint32, errno syscall.Errno) {
 	fmt.Println("GPGFile.Write was called")
-	encrypted, err := helper.EncryptMessageArmored(string(file.root.pubKey), string(data))
-	if err != nil {
-		fmt.Println("error writing file:", err)
-		return 0, fs.ToErrno(err)
-	}
-	err = os.WriteFile(file.file, []byte(encrypted), 0644)
-	if err != nil {
-		fmt.Println("error writing file:", err)
-		return 0, fs.ToErrno(err)
-	}
+	file.data = append(file.data, data...)
+
 	return uint32(len(data)), syscall.F_OK
 }
 
 func (file *GPGFile) Fsync(ctx context.Context, f fs.FileHandle, flags uint32) syscall.Errno {
 	fmt.Println("GPGRoot.Fsync was called", f)
+	encrypted, err := helper.EncryptMessageArmored(string(file.root.pubKey), string(file.data))
+	if err != nil {
+		fmt.Println("error writing file:", err)
+		return fs.ToErrno(err)
+	}
+	err = os.WriteFile(file.file, []byte(encrypted), 0644)
+	if err != nil {
+		fmt.Println("error writing file:", err)
+		return fs.ToErrno(err)
+	}
 	return fuse.F_OK
 }
 
