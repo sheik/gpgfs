@@ -17,11 +17,9 @@ import (
 	"runtime"
 	"runtime/pprof"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/hanwen/go-fuse/v2/fs"
-	"golang.org/x/term"
 )
 
 func main() {
@@ -53,11 +51,14 @@ func main() {
 			log.Fatalf("os.Create: %v", err)
 		}
 	}
-	fmt.Print("Enter GPG passphrase: ")
-	passPhrase, err := term.ReadPassword(syscall.Stdin)
-	if err != nil {
-		panic(err)
-	}
+	/*
+		fmt.Print("Enter GPG passphrase: ")
+		passPhrase, err := term.ReadPassword(syscall.Stdin)
+		if err != nil {
+			panic(err)
+		}
+	*/
+	passPhrase := []byte("Test1234Abc123")
 
 	root, err := gpgfs.NewGPGFileSystem(flag.Arg(1), *pubKey, *privKey, string(passPhrase))
 	if err != nil {

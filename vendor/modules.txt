@@ -43,7 +43,7 @@ github.com/cloudflare/circl/math/mlsbset
 github.com/cloudflare/circl/sign
 github.com/cloudflare/circl/sign/ed25519
 github.com/cloudflare/circl/sign/ed448
-# github.com/hanwen/go-fuse/v2 v2.1.0
+# github.com/hanwen/go-fuse/v2 v2.0.0-00010101000000-000000000000 => ../go-fuse/
 ## explicit; go 1.13
 github.com/hanwen/go-fuse/v2/fs
 github.com/hanwen/go-fuse/v2/fuse
@@ -67,12 +67,7 @@ golang.org/x/crypto/cast5
 ## explicit; go 1.17
 golang.org/x/sys/cpu
 golang.org/x/sys/internal/unsafeheader
-golang.org/x/sys/plan9
 golang.org/x/sys/unix
-golang.org/x/sys/windows
-# golang.org/x/term v0.0.0-20201126162022-7de9c90e9dd1
-## explicit; go 1.11
-golang.org/x/term
 # golang.org/x/text v0.3.3
 ## explicit; go 1.11
 golang.org/x/text/encoding
@@ -92,3 +87,4 @@ golang.org/x/text/internal/utf8internal
 golang.org/x/text/language
 golang.org/x/text/runes
 golang.org/x/text/transform
+# github.com/hanwen/go-fuse/v2 => ../go-fuse/

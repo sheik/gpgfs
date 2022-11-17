@@ -10,6 +10,7 @@ import (
 	"log"
 	"reflect"
 	"runtime"
+	"syscall"
 	"time"
 	"unsafe"
 )
@@ -95,6 +96,14 @@ func doInit(server *Server, req *request) {
 		server.kernelSettings.Flags |= CAP_FLOCK_LOCKS | CAP_POSIX_LOCKS
 	}
 
+	if server.opts.EnableAcl {
+		server.kernelSettings.Flags |= CAP_POSIX_ACL
+	}
+	if server.opts.SyncRead {
+		// Clear CAP_ASYNC_READ
+		server.kernelSettings.Flags &= ^uint32(CAP_ASYNC_READ)
+	}
+
 	dataCacheMode := input.Flags & CAP_AUTO_INVAL_DATA
 	if server.opts.ExplicitDataCacheControl {
 		// we don't want CAP_AUTO_INVAL_DATA even if we cannot go into fully explicit mode
@@ -151,6 +160,7 @@ func doOpen(server *Server, req *request) {
 }
 
 func doCreate(server *Server, req *request) {
+	fmt.Println("doCreate is called: ", req.filenames)
 	out := (*CreateOut)(req.outData())
 	status := server.fileSystem.Create(req.cancel, (*CreateIn)(req.inData), req.filenames[0], out)
 	req.status = status
@@ -380,6 +390,7 @@ func doRelease(server *Server, req *request) {
 }
 
 func doFsync(server *Server, req *request) {
+	fmt.Println("calling doFsync")
 	req.status = server.fileSystem.Fsync(req.cancel, (*FsyncIn)(req.inData))
 }
 
@@ -434,7 +445,7 @@ func doStatFs(server *Server, req *request) {
 }
 
 func doIoctl(server *Server, req *request) {
-	req.status = ENOSYS
+	req.status = Status(syscall.ENOTTY)
 }
 
 func doDestroy(server *Server, req *request) {
@@ -727,6 +738,7 @@ func init() {
 		_OP_SETATTR:               func(ptr unsafe.Pointer) interface{} { return (*AttrOut)(ptr) },
 		_OP_INIT:                  func(ptr unsafe.Pointer) interface{} { return (*InitOut)(ptr) },
 		_OP_MKDIR:                 func(ptr unsafe.Pointer) interface{} { return (*EntryOut)(ptr) },
+		_OP_MKNOD:                 func(ptr unsafe.Pointer) interface{} { return (*EntryOut)(ptr) },
 		_OP_NOTIFY_INVAL_ENTRY:    func(ptr unsafe.Pointer) interface{} { return (*NotifyInvalEntryOut)(ptr) },
 		_OP_NOTIFY_INVAL_INODE:    func(ptr unsafe.Pointer) interface{} { return (*NotifyInvalInodeOut)(ptr) },
 		_OP_NOTIFY_STORE_CACHE:    func(ptr unsafe.Pointer) interface{} { return (*NotifyStoreOut)(ptr) },

@@ -17,6 +17,7 @@ var _ = (fs.NodeFsyncer)((*GPGFile)(nil))
 var _ = (fs.NodeWriter)((*GPGFile)(nil))
 var _ = (fs.NodeCreater)((*GPGRoot)(nil))
 var _ = (fs.NodeUnlinker)((*GPGFile)(nil))
+var _ = (fs.NodeRenamer)((*GPGFile)(nil))
 
 type GPGRoot struct {
 	fs.Inode
@@ -27,32 +28,95 @@ type GPGRoot struct {
 	passPhrase []byte
 }
 
+func (r *GPGRoot) Readlink(ctx context.Context) ([]byte, syscall.Errno) {
+	fmt.Println("READLINK CALLED")
+	return nil, fuse.F_OK
+}
+
+func (r *GPGRoot) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
+	fmt.Println("setattr called:", *in, *out)
+	return fuse.F_OK
+}
+
+func (r *GPGRoot) Rename(ctx context.Context, name string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {
+	fmt.Println("GPGRoot.Rename called:", name, newName)
+	err := os.Rename(r.GetPath()+"/"+name, r.GetPath()+"/"+newName)
+	if err != nil {
+		fmt.Println("error renaming:", err)
+	}
+	node := r.GetChild(name)
+	fmt.Println("NODE!!!:", node)
+	success, _ := r.RmChild(name)
+	if !success {
+		fmt.Println("UNABLE TO REMOVE CHILD")
+	}
+	success = r.AddChild(newName, node, true)
+	if !success {
+		fmt.Println("UNABLE TO ADD CHILD")
+	}
+
+	return fs.ToErrno(err)
+}
+
+func (r *GPGRoot) Symlink(ctx context.Context, target, name string, out *fuse.EntryOut) (node *fs.Inode, errno syscall.Errno) {
+	fmt.Println("SYMLINK CALLED:", target, name)
+	ch := r.NewPersistentInode(ctx, NewGPGFile(), fs.StableAttr{Mode: fuse.S_IFLNK | 0777})
+	r.AddChild(name, ch, true)
+	return ch, fuse.F_OK
+}
+
 func (r *GPGRoot) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	fmt.Println("GPGRoot.Mkdir called:", name, mode)
-	node := r.NewInode(ctx, &fs.Inode{}, fs.StableAttr{Mode: fuse.S_IFDIR})
-	r.AddChild(name, node, true)
-	err := os.Mkdir("vault/"+name, 0755)
+	path := r.GetPath()
+	err := os.Mkdir(path+name, 0755)
 	if err != nil {
 		fmt.Println("error creating directory:", err)
 	}
+	node := r.NewInode(ctx, &GPGRoot{
+		Inode:      fs.Inode{},
+		root:       r.GetPath() + name,
+		pubKey:     r.pubKey,
+		privKey:    r.privKey,
+		passPhrase: r.passPhrase,
+	}, fs.StableAttr{Mode: fuse.S_IFDIR})
+	r.AddChild(name, node, true)
+
 	return node, fs.ToErrno(err)
 }
 
-func (r *GPGRoot) Unlink(ctx context.Context, name string) syscall.Errno {
-	fmt.Println("UNLINK CALLED:", name)
-	err := os.Remove("vault/" + name)
+func (r *GPGRoot) GetPath() string {
+	var name string
+	root := &r.Inode
+	path := ""
+	for root != nil {
+		name, root = root.Parent()
+		path = name + "/" + path
+	}
+	path = "./vault/" + path
+	return path
+}
+
+func (r *GPGRoot) Unlink(ctx context.Context, filename string) syscall.Errno {
+	fmt.Println("GPGRoot.Unlink:", filename)
+	path := r.GetPath()
+	fmt.Println("UNLINK: ", path+"/"+filename)
+	err := os.Remove(path + "/" + filename)
+	if err != nil {
+		fmt.Println(err)
+	}
+	r.RmChild(filename)
 	return fs.ToErrno(err)
 }
 
 func (r *GPGRoot) Create(ctx context.Context, name string, flags uint32, mode uint32, out *fuse.EntryOut) (node *fs.Inode, fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
 	errno = fuse.F_OK
 	fmt.Println("Create:", name)
-	fp, err := os.OpenFile(r.root+"/"+name, os.O_CREATE|os.O_RDWR, 0644)
+	fp, err := os.OpenFile(r.GetPath()+"/"+name, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
-	node = r.NewInode(ctx, &GPGFile{file: r.root + "/" + name, root: r}, fs.StableAttr{})
+	node = r.NewInode(ctx, &GPGFile{file: name, root: r}, fs.StableAttr{})
 	r.AddChild(name, node, true)
 	fh = fp
 	return
@@ -75,7 +139,7 @@ func (r *GPGRoot) OnAdd(ctx context.Context) {
 		if f.IsDir() {
 			continue
 		}
-		gpgfile := &GPGFile{root: r, file: r.root + "/" + f.Name()}
+		gpgfile := &GPGFile{root: r, file: r.GetPath() + "/" + f.Name()}
 		ch := p.NewPersistentInode(ctx, gpgfile, fs.StableAttr{})
 		r.Inode.AddChild(f.Name(), ch, true)
 	}
@@ -99,6 +163,37 @@ type GPGFile struct {
 	mu   sync.Mutex
 	data []byte
 	root *GPGRoot
+	link string
+	info fuse.Attr
+}
+
+func (file *GPGFile) Link(ctx context.Context, target fs.InodeEmbedder, name string, out *fuse.EntryOut) (node *fs.Inode, errno syscall.Errno) {
+	fmt.Println("LINK CALLED:", name)
+	return nil, fuse.F_OK
+}
+
+func (file *GPGFile) CopyFileRange(ctx context.Context, fhIn fs.FileHandle, offIn uint64, out *fs.Inode, fhOut fs.FileHandle, offOut uint64, len uint64, flags uint64) (uint32, syscall.Errno) {
+	fmt.Println("COPY CALLED!")
+	return 0, 0
+}
+
+func (file *GPGFile) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
+	fmt.Println("GPGFile.setattr called:", *in, *out)
+	return fuse.F_OK
+}
+
+func (file *GPGFile) Rename(ctx context.Context, name string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {
+	err := os.Rename(name, newName)
+	return fs.ToErrno(err)
+}
+
+func NewGPGFile() *GPGFile {
+	gpgfile := &GPGFile{Inode: fs.Inode{}}
+	gpgfile.Parents = fs.InodeParents{
+		Newest: nil,
+		Other:  make(map[fs.ParentData]struct{}),
+	}
+	return gpgfile
 }
 
 func (file *GPGFile) Flush(ctx context.Context, f fs.FileHandle) syscall.Errno {
@@ -117,14 +212,23 @@ func (file *GPGFile) Flush(ctx context.Context, f fs.FileHandle) syscall.Errno {
 }
 
 func (file *GPGFile) Unlink(ctx context.Context, name string) syscall.Errno {
-	fmt.Println("UNLINK CALLED:", name)
+	fmt.Println("GPGFile.Unlink called:", name)
 	return fuse.F_OK
 }
 
 func (file *GPGFile) Write(ctx context.Context, f fs.FileHandle, data []byte, off int64) (written uint32, errno syscall.Errno) {
-	fmt.Println("GPGFile.Write was called")
+	fmt.Println("GPGFile.Write was called:", file.file)
 	file.data = append(file.data, data...)
-
+	encrypted, err := helper.EncryptMessageArmored(string(file.root.pubKey), string(file.data))
+	if err != nil {
+		fmt.Println("error writing file:", err)
+		return 0, fs.ToErrno(err)
+	}
+	err = os.WriteFile(file.file, []byte(encrypted), 0644)
+	if err != nil {
+		fmt.Println("error writing file:", err)
+		return 0, fs.ToErrno(err)
+	}
 	return uint32(len(data)), syscall.F_OK
 }
 
@@ -146,8 +250,11 @@ func (file *GPGFile) Fsync(ctx context.Context, f fs.FileHandle, flags uint32) s
 // Getattr sets the minimum, which is the size. A more full-featured
 // FS would also set timestamps and permissions.
 func (file *GPGFile) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	fmt.Println("GPGFile.Getattr was called")
-	fileStat, err := os.Stat(file.file)
+	path := file.root.GetPath() + "/" + file.file
+	if file.link != "" {
+		path = file.root.GetPath() + "/" + file.link
+	}
+	fileStat, err := os.Stat(path)
 	if err != nil {
 		out.Mode = 0644
 		out.Nlink = 1
