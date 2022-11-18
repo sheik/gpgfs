@@ -58,9 +58,17 @@ func main() {
 			panic(err)
 		}
 	*/
-	passPhrase := []byte(os.Getenv("PASSPHRASE"))
+	pubkey, err := os.ReadFile(*pubKey)
+	if err != nil {
+		panic(err)
+	}
+	privkey, err := os.ReadFile(*privKey)
+	if err != nil {
+		panic(err)
+	}
+	passPhrase := os.Getenv("PASSPHRASE")
 
-	root, err := gpgfs.NewGPGFS(flag.Arg(1), *pubKey, *privKey, string(passPhrase))
+	root, err := gpgfs.NewGPGFS(flag.Arg(1), string(pubkey), string(privkey), passPhrase)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "NewGPGFS failed: %v\n", err)
 		os.Exit(1)
