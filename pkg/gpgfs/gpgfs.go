@@ -39,20 +39,35 @@ func (r *GPGRoot) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttr
 }
 
 func (r *GPGRoot) Rename(ctx context.Context, name string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {
+	p := newParent.(*GPGRoot)
+
+	ch := r.EmbeddedInode().GetChild(name)
+	gpgfile := &GPGFile{
+		Inode: *ch,
+		file:  newName,
+		name:  newName,
+		root:  p,
+		info:  fuse.Attr{},
+	}
+	node := r.NewInode(ctx, gpgfile, fs.StableAttr{})
+	p.EmbeddedInode().AddChild(newName, node, true)
+	//	r.RmChild(name)
+	/*
+		ch := r.EmbeddedInode().GetChild(name)
+		if ch == nil {
+			fmt.Println("OH NO ITS NIL")
+		}
+
+		fmt.Println(r.Inode.RmChild(name))
+
+		fmt.Println(p.Inode.AddChild(newName, node, true))
+		gpgfile.Flush(ctx, gpgfile.file)
+	*/
+
 	fmt.Println("GPGRoot.Rename called:", name, newName)
 	err := os.Rename(r.GetPath()+"/"+name, r.GetPath()+"/"+newName)
 	if err != nil {
 		fmt.Println("error renaming:", err)
-	}
-	node := r.GetChild(name)
-	fmt.Println("NODE!!!:", node)
-	success, _ := r.RmChild(name)
-	if !success {
-		fmt.Println("UNABLE TO REMOVE CHILD")
-	}
-	success = r.AddChild(newName, node, true)
-	if !success {
-		fmt.Println("UNABLE TO ADD CHILD")
 	}
 
 	return fs.ToErrno(err)
@@ -110,13 +125,13 @@ func (r *GPGRoot) Unlink(ctx context.Context, filename string) syscall.Errno {
 
 func (r *GPGRoot) Create(ctx context.Context, name string, flags uint32, mode uint32, out *fuse.EntryOut) (node *fs.Inode, fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
 	errno = fuse.F_OK
-	fmt.Println("Create:", name)
+	fmt.Println("Create:", r.GetPath()+"/"+name)
 	fp, err := os.OpenFile(r.GetPath()+"/"+name, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
-	node = r.NewInode(ctx, &GPGFile{file: name, root: r}, fs.StableAttr{})
+	node = r.NewInode(ctx, &GPGFile{file: name, root: r, name: name}, fs.StableAttr{})
 	r.AddChild(name, node, true)
 	fh = fp
 	return
@@ -139,7 +154,7 @@ func (r *GPGRoot) OnAdd(ctx context.Context) {
 		if f.IsDir() {
 			continue
 		}
-		gpgfile := &GPGFile{root: r, file: r.GetPath() + "/" + f.Name()}
+		gpgfile := &GPGFile{root: r, file: r.GetPath() + "/" + f.Name(), name: f.Name()}
 		ch := p.NewPersistentInode(ctx, gpgfile, fs.StableAttr{})
 		r.Inode.AddChild(f.Name(), ch, true)
 	}
@@ -160,6 +175,7 @@ func NewGPGTree(name, pubKey, privKey, passPhrase string) (fs.InodeEmbedder, err
 type GPGFile struct {
 	fs.Inode
 	file string
+	name string
 	mu   sync.Mutex
 	data []byte
 	root *GPGRoot
@@ -183,6 +199,7 @@ func (file *GPGFile) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 }
 
 func (file *GPGFile) Rename(ctx context.Context, name string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {
+	fmt.Println("RENAME:", name, newName)
 	err := os.Rename(name, newName)
 	return fs.ToErrno(err)
 }
@@ -203,12 +220,16 @@ func (file *GPGFile) Flush(ctx context.Context, f fs.FileHandle) syscall.Errno {
 		fmt.Println("error writing file:", err)
 		return fs.ToErrno(err)
 	}
-	err = os.WriteFile(file.file, []byte(encrypted), 0644)
+	err = os.WriteFile(file.GetStorageLocation(), []byte(encrypted), 0644)
 	if err != nil {
 		fmt.Println("error writing file:", err)
 		return fs.ToErrno(err)
 	}
 	return fuse.F_OK
+}
+
+func (file *GPGFile) GetStorageLocation() string {
+	return file.root.GetPath() + "/" + file.name
 }
 
 func (file *GPGFile) Unlink(ctx context.Context, name string) syscall.Errno {
@@ -224,7 +245,7 @@ func (file *GPGFile) Write(ctx context.Context, f fs.FileHandle, data []byte, of
 		fmt.Println("error writing file:", err)
 		return 0, fs.ToErrno(err)
 	}
-	err = os.WriteFile(file.file, []byte(encrypted), 0644)
+	err = os.WriteFile(file.GetStorageLocation(), []byte(encrypted), 0644)
 	if err != nil {
 		fmt.Println("error writing file:", err)
 		return 0, fs.ToErrno(err)
@@ -239,7 +260,7 @@ func (file *GPGFile) Fsync(ctx context.Context, f fs.FileHandle, flags uint32) s
 		fmt.Println("error writing file:", err)
 		return fs.ToErrno(err)
 	}
-	err = os.WriteFile(file.file, []byte(encrypted), 0644)
+	err = os.WriteFile(file.GetStorageLocation(), []byte(encrypted), 0644)
 	if err != nil {
 		fmt.Println("error writing file:", err)
 		return fs.ToErrno(err)
