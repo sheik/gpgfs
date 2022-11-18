@@ -10,7 +10,7 @@ package fs
 // No internal locking: the caller is responsible for preventing
 // concurrent access.
 type InodeParents struct {
-	// Newest is the most-recently add()'ed parent.
+	// Newest is the most-recently add()'ed Parent.
 	// nil when we don't have any Parents.
 	Newest *ParentData
 	// Other are Parents in addition to the Newest.
@@ -18,9 +18,9 @@ type InodeParents struct {
 	Other map[ParentData]struct{}
 }
 
-// add adds a parent to the store.
+// add adds a Parent to the store.
 func (p *InodeParents) add(n ParentData) {
-	// one and only parent
+	// one and only Parent
 	if p.Newest == nil {
 		p.Newest = &n
 	}
@@ -33,19 +33,19 @@ func (p *InodeParents) add(n ParentData) {
 		p.Other = make(map[ParentData]struct{})
 	}
 	p.Other[*p.Newest] = struct{}{}
-	// new parent becomes `Newest` (possibly moving up from `Other`)
+	// new Parent becomes `Newest` (possibly moving up from `Other`)
 	delete(p.Other, n)
 	p.Newest = &n
 }
 
-// get returns the most recent parent
-// or nil if there is no parent at all.
+// get returns the most recent Parent
+// or nil if there is no Parent at all.
 func (p *InodeParents) get() *ParentData {
 	return p.Newest
 }
 
 // all returns all known Parents
-// or nil if there is no parent at all.
+// or nil if there is no Parent at all.
 func (p *InodeParents) all() []ParentData {
 	count := p.count()
 	if count == 0 {
@@ -96,6 +96,6 @@ func (p *InodeParents) count() int {
 }
 
 type ParentData struct {
-	name   string
-	parent *Inode
+	Name   string
+	Parent *Inode
 }

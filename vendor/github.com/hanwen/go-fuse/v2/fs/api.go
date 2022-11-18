@@ -19,7 +19,7 @@
 //	// Node types should implement some file system operations, eg. Lookup
 //	var _ = (fs.NodeLookuper)((*myNode)(nil))
 //
-//	func (n *myNode) Lookup(ctx context.Context, name string,  ... ) (*Inode, syscall.Errno) {
+//	func (n *myNode) Lookup(ctx context.Context, Name string,  ... ) (*Inode, syscall.Errno) {
 //	  ops := myNode{}
 //	  return n.NewInode(ctx, &ops, fs.StableAttr{Mode: syscall.S_IFDIR}), 0
 //	}
@@ -81,8 +81,8 @@
 // File descriptor: a handle returned to opening a file. File
 // descriptors always refer to a single inode.
 //
-// Dirent: a dirent maps (parent inode number, name string) tuple to
-// child inode, thus representing a parent/child relation (or the
+// Dirent: a dirent maps (Parent inode number, Name string) tuple to
+// child inode, thus representing a Parent/child relation (or the
 // absense thereof). Dirents do not have an equivalent type inside
 // Go-FUSE, but the result of Lookup operation essentially is a
 // dirent, which the kernel puts in a cache.
@@ -99,7 +99,7 @@
 // attribute timeout fields in fuse.AttrOut and fuse.EntryOut, which
 // get be populated from Getattr and Lookup
 //
-// 3. Directory entries (parent/child relations in the FS tree):
+// 3. Directory entries (Parent/child relations in the FS tree):
 // controlled with the timeout fields in fuse.EntryOut, and
 // invalidated with Inode.NotifyEntry and Inode.NotifyDelete.
 //
@@ -376,7 +376,7 @@ type DirStream interface {
 	Close()
 }
 
-// Lookup should find a direct child of a directory by the child's name.  If
+// Lookup should find a direct child of a directory by the child's Name.  If
 // the entry does not exist, it should return ENOENT and optionally
 // set a NegativeTimeout in `out`. If it does exist, it should return
 // attribute data in `out` and return the Inode for the child. A new
@@ -384,9 +384,9 @@ type DirStream interface {
 // added to the FS tree automatically if the return status is OK.
 //
 // If a directory does not implement NodeLookuper, the library looks
-// for an existing child with the given name.
+// for an existing child with the given Name.
 //
-// The input to a Lookup is {parent directory, name string}.
+// The input to a Lookup is {Parent directory, Name string}.
 //
 // Lookup, if successful, must return an *Inode. Once the Inode is
 // returned to the kernel, the kernel can issue further operations,

@@ -55,7 +55,7 @@ func (ds *loopbackDirStream) HasNext() bool {
 	return len(ds.todo) > 0
 }
 
-// Like syscall.Dirent, but without the [256]byte name.
+// Like syscall.Dirent, but without the [256]byte Name.
 type dirent struct {
 	Ino    uint64
 	Off    int64
@@ -69,7 +69,7 @@ func (ds *loopbackDirStream) Next() (fuse.DirEntry, syscall.Errno) {
 	defer ds.mu.Unlock()
 
 	// We can't use syscall.Dirent here, because it declares a
-	// [256]byte name, which may run beyond the end of ds.todo.
+	// [256]byte Name, which may run beyond the end of ds.todo.
 	// when that happens in the race detector, it causes a panic
 	// "converted pointer straddles multiple allocations"
 	de := (*dirent)(unsafe.Pointer(&ds.todo[0]))

@@ -58,11 +58,11 @@ func main() {
 			panic(err)
 		}
 	*/
-	passPhrase := []byte("Test1234Abc123")
+	passPhrase := []byte(os.Getenv("PASSPHRASE"))
 
-	root, err := gpgfs.NewGPGFileSystem(flag.Arg(1), *pubKey, *privKey, string(passPhrase))
+	root, err := gpgfs.NewGPGFS(flag.Arg(1), *pubKey, *privKey, string(passPhrase))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "NewArchiveFileSystem failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "NewGPGFS failed: %v\n", err)
 		os.Exit(1)
 	}
 

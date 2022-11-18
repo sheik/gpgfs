@@ -280,15 +280,15 @@ func (n *Inode) Path(root *Inode) string {
 		// We don't try to take all locks at the same time, because
 		// the caller won't use the "path" string under lock anyway.
 		p.mu.Lock()
-		// Get last known parent
+		// Get last known Parent
 		pd := p.Parents.get()
 		p.mu.Unlock()
 		if pd == nil {
 			p = nil
 			break
 		}
-		segments = append(segments, pd.name)
-		p = pd.parent
+		segments = append(segments, pd.Name)
+		p = pd.Parent
 	}
 
 	if root != nil && root != p {
@@ -312,7 +312,7 @@ func (n *Inode) Path(root *Inode) string {
 	return path
 }
 
-// setEntry does `iparent[name] = ichild` linking.
+// setEntry does `iparent[Name] = ichild` linking.
 //
 // setEntry must not be called simultaneously for any of iparent or ichild.
 // This, for example could be satisfied if both iparent and ichild are locked,
@@ -321,9 +321,9 @@ func (n *Inode) Path(root *Inode) string {
 func (iparent *Inode) setEntry(name string, ichild *Inode) {
 	newParent := ParentData{name, iparent}
 	if ichild.stableAttr.Mode == syscall.S_IFDIR {
-		// Directories cannot have more than one parent. Clear the map.
+		// Directories cannot have more than one Parent. Clear the map.
 		// This special-case is neccessary because ichild may still have a
-		// parent that was forgotten (i.e. removed from bridge.inoMap).
+		// Parent that was forgotten (i.e. removed from bridge.inoMap).
 		ichild.Parents.clear()
 	}
 	ichild.Parents.add(newParent)
@@ -405,7 +405,7 @@ retry:
 		live = n.lookupCount > 0 || len(n.children) > 0 || n.persistent
 		for _, p := range n.Parents.all() {
 			parents = append(parents, p)
-			lockme = append(lockme, p.parent)
+			lockme = append(lockme, p.Parent)
 		}
 		n.mu.Unlock()
 
@@ -422,12 +422,12 @@ retry:
 		}
 
 		for _, p := range parents {
-			if p.parent.children[p.name] != n {
+			if p.Parent.children[p.Name] != n {
 				// another node has replaced us already
 				continue
 			}
-			delete(p.parent.children, p.name)
-			p.parent.changeCounter++
+			delete(p.Parent.children, p.Name)
+			p.Parent.changeCounter++
 		}
 		n.Parents.clear()
 		n.changeCounter++
@@ -448,8 +448,8 @@ retry:
 	return forgotten, false
 }
 
-// GetChild returns a child node with the given name, or nil if the
-// directory has no child by that name.
+// GetChild returns a child node with the given Name, or nil if the
+// directory has no child by that Name.
 func (n *Inode) GetChild(name string) *Inode {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -460,7 +460,7 @@ func (n *Inode) GetChild(name string) *Inode {
 // the destination already exists.
 func (n *Inode) AddChild(name string, ch *Inode, overwrite bool) (success bool) {
 	if len(name) == 0 {
-		log.Panic("empty name for inode")
+		log.Panic("empty Name for inode")
 	}
 
 retry:
@@ -511,7 +511,7 @@ func (n *Inode) Children() map[string]*Inode {
 	return r
 }
 
-// Parents returns a parent of this Inode, or nil if this Inode is
+// Parents returns a Parent of this Inode, or nil if this Inode is
 // deleted or is the root
 func (n *Inode) Parent() (string, *Inode) {
 	n.mu.Lock()
@@ -520,7 +520,7 @@ func (n *Inode) Parent() (string, *Inode) {
 	if p == nil {
 		return "", nil
 	}
-	return p.name, p.parent
+	return p.Name, p.Parent
 }
 
 // RmAllChildren recursively drops a tree, forgetting all persistent
@@ -714,7 +714,7 @@ retry:
 	}
 }
 
-// NotifyEntry notifies the kernel that data for a (directory, name)
+// NotifyEntry notifies the kernel that data for a (directory, Name)
 // tuple should be invalidated. On next access, a LOOKUP operation
 // will be started.
 func (n *Inode) NotifyEntry(name string) syscall.Errno {
@@ -723,7 +723,7 @@ func (n *Inode) NotifyEntry(name string) syscall.Errno {
 }
 
 // NotifyDelete notifies the kernel that the given inode was removed
-// from this directory as entry under the given name. It is equivalent
+// from this directory as entry under the given Name. It is equivalent
 // to NotifyEntry, but also sends an event to inotify watchers.
 func (n *Inode) NotifyDelete(name string, child *Inode) syscall.Errno {
 	// XXX arg ordering?

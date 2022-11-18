@@ -160,7 +160,6 @@ func doOpen(server *Server, req *request) {
 }
 
 func doCreate(server *Server, req *request) {
-	fmt.Println("doCreate is called: ", req.filenames)
 	out := (*CreateOut)(req.outData())
 	status := server.fileSystem.Create(req.cancel, (*CreateIn)(req.inData), req.filenames[0], out)
 	req.status = status
@@ -390,7 +389,6 @@ func doRelease(server *Server, req *request) {
 }
 
 func doFsync(server *Server, req *request) {
-	fmt.Println("calling doFsync")
 	req.status = server.fileSystem.Fsync(req.cancel, (*FsyncIn)(req.inData))
 }
 

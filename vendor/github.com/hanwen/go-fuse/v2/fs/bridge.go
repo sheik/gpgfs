@@ -6,7 +6,6 @@ package fs
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"runtime/debug"
 	"sync"
@@ -593,10 +592,10 @@ func (b *rawBridge) Rename(cancel <-chan struct{}, input *fuse.RenameIn, oldName
 		errno := mops.Rename(&fuse.Context{Caller: input.Caller, Cancel: cancel}, oldName, p2.ops, newName, input.Flags)
 		if errno == 0 {
 			if input.Flags&RENAME_EXCHANGE != 0 {
-				p1.ExchangeChild(oldName, p2, newName)
+				//p1.ExchangeChild(oldName, p2, newName)
 			} else {
 				// MvChild cannot fail with overwrite=true.
-				_ = p1.MvChild(oldName, p2, newName, true)
+				//_ = p1.MvChild(oldName, p2, newName, true)
 			}
 		}
 		return errnoToStatus(errno)
@@ -885,18 +884,13 @@ func (b *rawBridge) Flush(cancel <-chan struct{}, input *fuse.FlushIn) fuse.Stat
 }
 
 func (b *rawBridge) Fsync(cancel <-chan struct{}, input *fuse.FsyncIn) fuse.Status {
-	fmt.Println("trying to call fsync!")
 	n, f := b.inode(input.NodeId, input.Fh)
-	fmt.Printf("file: %+v\n", f)
 	if fs, ok := n.ops.(NodeFsyncer); ok {
-		fmt.Println("calling NodeFsyncer.Fsync")
 		return errnoToStatus(fs.Fsync(&fuse.Context{Caller: input.Caller, Cancel: cancel}, f.file, input.FsyncFlags))
 	}
 	if fs, ok := f.file.(FileFsyncer); ok {
-		fmt.Println("calling FileFsyncer.Fsync")
 		return errnoToStatus(fs.Fsync(&fuse.Context{Caller: input.Caller, Cancel: cancel}, input.FsyncFlags))
 	}
-	fmt.Println("could not infer type, not calling fsync")
 	return fuse.ENOTSUP
 }
 
