@@ -2,8 +2,6 @@
 gpgfs is a FUSE filesystem that will mount a directory of encrypted files
 and unencrypt them on the fly.
 
-The current version is read-only.
-
 ## Install
     go install github.com/sheik/gpgfs/cmd/gpgfs@latest
 
