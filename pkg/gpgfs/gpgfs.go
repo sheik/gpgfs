@@ -166,6 +166,8 @@ func (G *GPGFS) Rename(ctx context.Context, name string, newParent fs.InodeEmbed
 
 func NewEncryptedFilesystem(vault, pubkey, privkey, password string) (*GPGFS, error) {
 	VAULT = vault
+	path := filepath.Join(VAULT, ".db")
+	os.Mkdir(path, 0700)
 	return NewGPGFS(vault, pubkey, privkey, password)
 }
 
