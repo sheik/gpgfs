@@ -2,6 +2,7 @@ package gpgfs
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"github.com/ProtonMail/gopenpgp/v2/helper"
 	"github.com/hanwen/go-fuse/v2/fs"
@@ -13,6 +14,12 @@ import (
 	"time"
 )
 
+const SALT = "7861492h18ncdskjhfnb132riunfn21n3unf9284env92183nf9283nkjnwdfsjnvk231"
+
+var (
+	VAULT = ""
+)
+
 type GPGFS struct {
 	fs.Inode
 	vault    string
@@ -21,12 +28,15 @@ type GPGFS struct {
 	password string
 
 	nodes map[string]*GPGFile
+	dirs  map[string]*GPGFS
 }
 
 func (G *GPGFS) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	log.Println("GPGFS.Mkdir called:", name)
+	id := G.SaveName(name)
 	path := filepath.Join(G.vault, name)
-	os.Mkdir(path, 0755)
+	dataPath := filepath.Join(G.vault, id)
+	os.Mkdir(dataPath, 0755)
 	G.AddDir(ctx, path)
 	node := G.GetChild(name)
 	return node, fuse.F_OK
@@ -38,12 +48,55 @@ func (G *GPGFS) Symlink(ctx context.Context, target, name string, out *fuse.Entr
 	return ch, fuse.F_OK
 }
 
+func (G *GPGFS) GetID(name string) string {
+	sum := sha256.Sum256([]byte(G.vault + name + SALT))
+	return fmt.Sprintf("%x", sum)
+}
+
+func (G *GPGFS) SaveName(name string) string {
+	id := G.GetID(name)
+	filenameFile := filepath.Join(VAULT, ".db", id)
+
+	fp, err := os.OpenFile(filenameFile, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		panic(err)
+	}
+	defer fp.Close()
+
+	encrypted, err := helper.EncryptMessageArmored(G.pubkey, string(name))
+	if err != nil {
+		panic(err)
+	}
+
+	fp.WriteString(encrypted)
+
+	return id
+}
+
+func (G *GPGFS) GetName(id string) string {
+	filenameFile := filepath.Join(VAULT, ".db", id)
+	buf, err := os.ReadFile(filenameFile)
+	if err != nil {
+		panic(err)
+	}
+	unencrypted, err := helper.DecryptMessageArmored(G.privkey, []byte(G.password), string(buf))
+	if err != nil {
+		panic(err)
+	}
+	return unencrypted
+}
+
 func (G *GPGFS) Create(ctx context.Context, name string, flags uint32, mode uint32, out *fuse.EntryOut) (node *fs.Inode, fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
 	errno = fuse.F_OK
-	path := filepath.Join(G.vault, name)
 	log.Println("GPGFS.Create called:", name)
 
-	fp, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0644)
+	id := G.SaveName(name)
+	path := filepath.Join(G.vault, name)
+	dataPath := filepath.Join(G.vault, id)
+
+	G.AddFile(ctx, path, nil)
+
+	fp, err := os.OpenFile(dataPath, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		log.Println(err)
 		err = fs.ToErrno(err)
@@ -51,7 +104,6 @@ func (G *GPGFS) Create(ctx context.Context, name string, flags uint32, mode uint
 	}
 	fp.Close()
 
-	G.AddFile(ctx, path, nil)
 	node = G.GetChild(name)
 	fh = nil
 	return
@@ -85,8 +137,12 @@ func (G *GPGFS) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut)
 func (G *GPGFS) Rename(ctx context.Context, name string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {
 	log.Println("Rename called:", name, newName)
 
-	oldPath := filepath.Join(G.vault, name)
-	newPath := filepath.Join(G.vault, newName)
+	nameID := G.GetID(name)
+	newNameID := G.GetID(newName)
+	G.SaveName(newName)
+
+	oldPath := filepath.Join(G.vault, nameID)
+	newPath := filepath.Join(G.vault, newNameID)
 
 	// rename data file
 	err := os.Rename(oldPath, newPath)
@@ -94,29 +150,44 @@ func (G *GPGFS) Rename(ctx context.Context, name string, newParent fs.InodeEmbed
 		return fs.ToErrno(err)
 	}
 
-	// reorg the filesystem
-	G.nodes[name].dataFile = newPath
-	G.nodes[newName] = G.nodes[name]
-	delete(G.nodes, name)
+	if G.GetChild(name).IsDir() {
+		G.dirs[name].vault = newPath
+		G.dirs[newName] = G.dirs[name]
+		delete(G.dirs, name)
+	} else {
+		// reorg the filesystem
+		G.nodes[name].dataFile = newPath
+		G.nodes[newName] = G.nodes[name]
+		delete(G.nodes, nameID)
+	}
 
 	return syscall.F_OK
+}
+
+func NewEncryptedFilesystem(vault, pubkey, privkey, password string) (*GPGFS, error) {
+	VAULT = vault
+	return NewGPGFS(vault, pubkey, privkey, password)
 }
 
 func NewGPGFS(vault, pubkey, privkey, password string) (*GPGFS, error) {
 	if privkey == "" || pubkey == "" || password == "" {
 		return nil, fmt.Errorf("private key, public key, and password are required")
 	}
-	return &GPGFS{vault: vault, pubkey: pubkey, privkey: privkey, password: password, nodes: make(map[string]*GPGFile)}, nil
+	return &GPGFS{vault: vault, pubkey: pubkey, privkey: privkey, password: password, nodes: make(map[string]*GPGFile), dirs: make(map[string]*GPGFS)}, nil
 }
 
 func (G *GPGFS) OnAdd(ctx context.Context) {
-	log.Println("OnAdd called")
+	log.Println("OnAdd called:", G.vault)
 	nodes, err := os.ReadDir(G.vault)
 	if err != nil {
 		panic(err)
 	}
 	for _, node := range nodes {
-		path := filepath.Join(G.vault, node.Name())
+		if node.Name() == ".db" {
+			continue
+		}
+		name := G.GetName(node.Name())
+		path := filepath.Join(G.vault, name)
 		if node.IsDir() {
 			G.AddDir(ctx, path)
 		} else {
@@ -127,9 +198,12 @@ func (G *GPGFS) OnAdd(ctx context.Context) {
 
 func (G *GPGFS) AddDir(ctx context.Context, path string) *GPGFS {
 	log.Println("AddDir called, path:", path)
-	dir, _ := NewGPGFS(path, G.pubkey, G.privkey, G.password)
+	name := filepath.Base(path)
+	id := G.SaveName(name)
+	dir, _ := NewGPGFS(filepath.Join(G.vault, id), G.pubkey, G.privkey, G.password)
+	G.dirs[filepath.Base(path)] = dir
 	ch := G.NewPersistentInode(ctx, dir, fs.StableAttr{Mode: fuse.S_IFDIR})
-	ok := G.AddChild(filepath.Base(path), ch, true)
+	ok := G.AddChild(name, ch, true)
 	if !ok {
 		panic("could not add child")
 	}
@@ -138,13 +212,15 @@ func (G *GPGFS) AddDir(ctx context.Context, path string) *GPGFS {
 
 func (G *GPGFS) AddFile(ctx context.Context, path string, node *fs.Inode) {
 	log.Println("AddFile called, path:", path)
-	file := NewGPGFile(path, G)
+	name := filepath.Base(path)
+	id := G.SaveName(name)
+	file := NewGPGFile(filepath.Join(G.vault, id), G)
 	if node != nil {
 		file.Inode = *node
 	}
 	G.nodes[filepath.Base(path)] = file
 	ch := G.NewPersistentInode(ctx, file, fs.StableAttr{})
-	ok := G.AddChild(filepath.Base(path), ch, true)
+	ok := G.AddChild(name, ch, true)
 	if !ok {
 		panic("could not add child")
 	}
@@ -257,7 +333,9 @@ func (file *GPGFile) Flush(ctx context.Context, f fs.FileHandle) syscall.Errno {
 }
 
 func (file *GPGFile) Write(ctx context.Context, f fs.FileHandle, data []byte, off int64) (written uint32, errno syscall.Errno) {
-	log.Println("Write: ", file.dataFile, string(data))
+	log.Println("Write: ", file.dataFile, string(data), off)
+
+	file.data = file.data[:off]
 
 	//	file.data = append(file.data, data...)
 	file.data = append(file.data, data...)
@@ -269,7 +347,7 @@ func (file *GPGFile) Write(ctx context.Context, f fs.FileHandle, data []byte, of
 }
 
 func (file *GPGFile) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
-	log.Printf("GPGFile.Open: %s", file.dataFile)
+	log.Printf("GPGFile.Open: %s %x", file.dataFile, fuseFlags)
 	return nil, fuse.FOPEN_KEEP_CACHE, fuse.F_OK
 }
 
@@ -380,11 +458,12 @@ func (file *GPGFile) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
 }
 
 func (G *GPGFS) Unlink(ctx context.Context, name string) syscall.Errno {
-	fmt.Println("GPGFile.Unlink called:", name)
-	path := filepath.Join(G.vault, name)
+	id := G.GetID(name)
+	path := filepath.Join(G.vault, id)
+	fmt.Println("GPGFile.Unlink called:", name, path)
 	err := syscall.Unlink(path)
 	if err != nil {
 		log.Println(err)
 	}
-	return fs.ToErrno(err)
+	return fuse.F_OK
 }

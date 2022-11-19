@@ -68,7 +68,7 @@ func main() {
 	}
 	passPhrase := os.Getenv("PASSPHRASE")
 
-	root, err := gpgfs.NewGPGFS(flag.Arg(1), string(pubkey), string(privkey), passPhrase)
+	root, err := gpgfs.NewEncryptedFilesystem(flag.Arg(1), string(pubkey), string(privkey), passPhrase)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "NewGPGFS failed: %v\n", err)
 		os.Exit(1)
