@@ -276,7 +276,6 @@ func (file *GPGFile) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, 
 
 // Read simply returns the data that was already unpacked in the Open call
 func (file *GPGFile) Read(ctx context.Context, f fs.FileHandle, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
-
 	if file.data == nil {
 		file.LoadData()
 	}
@@ -356,9 +355,11 @@ func (file *GPGFile) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
 		return fs.ToErrno(err)
 	}
 
-	err = file.LoadData()
-	if err != nil {
-		log.Println("LoadData failed: ", err)
+	if file.data == nil {
+		err = file.LoadData()
+		if err != nil {
+			log.Println("LoadData failed: ", err)
+		}
 	}
 
 	stat := fileStat.Sys().(*syscall.Stat_t)
