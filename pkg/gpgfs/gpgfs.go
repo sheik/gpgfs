@@ -95,7 +95,6 @@ func (G *GPGFS) Rename(ctx context.Context, name string, newParent fs.InodeEmbed
 	}
 
 	// reorg the filesystem
-	G.MvChild(name, &G.Inode, newName, true)
 	G.nodes[name].dataFile = newPath
 	G.nodes[newName] = G.nodes[name]
 	delete(G.nodes, name)
@@ -311,7 +310,6 @@ func (file *GPGFile) SaveData() error {
 }
 
 func (file *GPGFile) LoadData() error {
-
 	fileStat, err := os.Stat(file.dataFile)
 	if err != nil {
 		return err

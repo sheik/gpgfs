@@ -53,13 +53,13 @@ func (r *LoopbackRoot) idFromStat(st *syscall.Stat_t) StableAttr {
 		Mode: uint32(st.Mode),
 		Gen:  1,
 		// This should work well for traditional backing FSes,
-		// not so much for Other go-fuse FS-es
+		// not so much for other go-fuse FS-es
 		Ino: (swapped ^ swappedRootDev) ^ st.Ino,
 	}
 }
 
 // LoopbackNode is a filesystem node in a loopback file system. It is
-// public so it can be used as a basis for Other loopback based
+// public so it can be used as a basis for other loopback based
 // filesystems. See NewLoopbackFile or LoopbackRoot for more
 // information.
 type LoopbackNode struct {

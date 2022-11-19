@@ -18,13 +18,13 @@ func (a *Attr) string() string {
 	return fmt.Sprintf(
 		"{M0%o SZ=%d L=%d "+
 			"%d:%d "+
-			"B%d*%d i%d:%d "+
+			"%d %d:%d "+
 			"A %f "+
 			"M %f "+
 			"C %f}",
 		a.Mode, a.Size, a.Nlink,
 		a.Uid, a.Gid,
-		a.Blocks, a.Blksize,
+		a.Blocks,
 		a.Rdev, a.Ino, ft(a.Atime, a.Atimensec), ft(a.Mtime, a.Mtimensec),
 		ft(a.Ctime, a.Ctimensec))
 }

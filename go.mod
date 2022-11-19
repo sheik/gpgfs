@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	github.com/ProtonMail/gopenpgp/v2 v2.4.10
-	github.com/hanwen/go-fuse/v2 v2.0.0-00010101000000-000000000000
+	github.com/hanwen/go-fuse/v2 v2.1.0
 )
 
 require (
@@ -18,5 +18,3 @@ require (
 	golang.org/x/sys v0.0.0-20211007075335-d3039528d8ac // indirect
 	golang.org/x/text v0.3.3 // indirect
 )
-
-replace github.com/hanwen/go-fuse/v2 => ../go-fuse/

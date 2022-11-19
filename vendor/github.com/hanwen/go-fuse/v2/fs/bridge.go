@@ -7,7 +7,6 @@ package fs
 import (
 	"context"
 	"log"
-	"runtime/debug"
 	"sync"
 	"syscall"
 	"time"
@@ -82,12 +81,6 @@ type rawBridge struct {
 	kernelNodeIds map[uint64]*Inode
 	// nextNodeID is the next free NodeID. Increment after copying the value.
 	nextNodeId uint64
-	// nodeCountHigh records the highest number of entries we had in the
-	// kernelNodeIds map.
-	// As the size of stableAttrs tracks kernelNodeIds (+- a few entries due to
-	// concurrent FORGETs, LOOKUPs, and the fixed NodeID 1), this is also a good
-	// estimate for stableAttrs.
-	nodeCountHigh int
 
 	files     []*fileEntry
 	freeFiles []uint32
@@ -208,9 +201,6 @@ func (b *rawBridge) addNewChild(parent *Inode, name string, child *Inode, file F
 	child.changeCounter++
 
 	b.kernelNodeIds[child.nodeId] = child
-	if len(b.kernelNodeIds) > b.nodeCountHigh {
-		b.nodeCountHigh = len(b.kernelNodeIds)
-	}
 	// Any node that might be there is overwritten - it is obsolete now
 	b.stableAttrs[id] = child
 	if file != nil {
@@ -269,6 +259,9 @@ func NewNodeFS(root InodeEmbedder, opts *Options) fuse.RawFileSystem {
 		server:       opts.ServerCallbacks,
 		nextNodeId:   2, // the root node has nodeid 1
 		stableAttrs:  make(map[StableAttr]*Inode),
+	}
+	if bridge.automaticIno == 1 {
+		bridge.automaticIno++
 	}
 
 	if bridge.automaticIno == 0 {
@@ -425,8 +418,6 @@ func (b *rawBridge) Mknod(cancel <-chan struct{}, input *fuse.MknodIn, name stri
 	var errno syscall.Errno
 	if mops, ok := parent.ops.(NodeMknoder); ok {
 		child, errno = mops.Mknod(&fuse.Context{Caller: input.Caller, Cancel: cancel}, name, input.Mode, input.Rdev, out)
-	} else {
-		return fuse.ENOTSUP
 	}
 
 	if errno != 0 {
@@ -472,47 +463,7 @@ func (b *rawBridge) Create(cancel <-chan struct{}, input *fuse.CreateIn, name st
 
 func (b *rawBridge) Forget(nodeid, nlookup uint64) {
 	n, _ := b.inode(nodeid, 0)
-	forgotten, _ := n.removeRef(nlookup, false)
-
-	if forgotten {
-		b.compactMemory()
-	}
-}
-
-// compactMemory tries to free memory that was previously used by forgotten
-// nodes.
-//
-// Maps do not free all memory when elements get deleted
-// ( https://github.com/golang/go/issues/20135 ).
-// As a workaround, we recreate our two big maps (stableAttrs & kernelNodeIds)
-// every time they have shrunk dramatically (100 x smaller).
-// In this case, `nodeCountHigh` is reset to the new (smaller) size.
-func (b *rawBridge) compactMemory() {
-	b.mu.Lock()
-
-	if b.nodeCountHigh <= len(b.kernelNodeIds)*100 {
-		b.mu.Unlock()
-		return
-	}
-
-	tmpStableAttrs := make(map[StableAttr]*Inode, len(b.stableAttrs))
-	for i, v := range b.stableAttrs {
-		tmpStableAttrs[i] = v
-	}
-	b.stableAttrs = tmpStableAttrs
-
-	tmpKernelNodeIds := make(map[uint64]*Inode, len(b.kernelNodeIds))
-	for i, v := range b.kernelNodeIds {
-		tmpKernelNodeIds[i] = v
-	}
-	b.kernelNodeIds = tmpKernelNodeIds
-
-	b.nodeCountHigh = len(b.kernelNodeIds)
-
-	b.mu.Unlock()
-
-	// Run outside b.mu
-	debug.FreeOSMemory()
+	n.removeRef(nlookup, false)
 }
 
 func (b *rawBridge) SetDebug(debug bool) {}
@@ -592,10 +543,10 @@ func (b *rawBridge) Rename(cancel <-chan struct{}, input *fuse.RenameIn, oldName
 		errno := mops.Rename(&fuse.Context{Caller: input.Caller, Cancel: cancel}, oldName, p2.ops, newName, input.Flags)
 		if errno == 0 {
 			if input.Flags&RENAME_EXCHANGE != 0 {
-				//p1.ExchangeChild(oldName, p2, newName)
+				p1.ExchangeChild(oldName, p2, newName)
 			} else {
 				// MvChild cannot fail with overwrite=true.
-				//_ = p1.MvChild(oldName, p2, newName, true)
+				_ = p1.MvChild(oldName, p2, newName, true)
 			}
 		}
 		return errnoToStatus(errno)
