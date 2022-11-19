@@ -1,2 +1,5 @@
 .idea
 /gpgfs
+/mnt
+/vault
+/log.txt
