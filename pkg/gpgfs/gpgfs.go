@@ -22,6 +22,14 @@ type GPGFS struct {
 	password string
 }
 
+func (G *GPGFS) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	path := filepath.Join(G.vault, name)
+	os.Mkdir(path, 0755)
+	G.AddDir(ctx, path)
+	node := G.GetChild(name)
+	return node, fuse.F_OK
+}
+
 func (G *GPGFS) Create(ctx context.Context, name string, flags uint32, mode uint32, out *fuse.EntryOut) (node *fs.Inode, fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
 	errno = fuse.F_OK
 	path := filepath.Join(G.vault, name)
@@ -110,7 +118,7 @@ func (G *GPGFS) OnAdd(ctx context.Context) {
 	}
 }
 
-func (G *GPGFS) AddDir(ctx context.Context, path string) {
+func (G *GPGFS) AddDir(ctx context.Context, path string) *GPGFS {
 	log.Println("AddDir called, path:", path)
 	dir, _ := NewGPGFS(path, G.pubkey, G.privkey, G.password)
 	ch := G.NewPersistentInode(ctx, dir, fs.StableAttr{Mode: fuse.S_IFDIR})
@@ -118,6 +126,7 @@ func (G *GPGFS) AddDir(ctx context.Context, path string) {
 	if !ok {
 		panic("could not add child")
 	}
+	return dir
 }
 
 func (G *GPGFS) AddFile(ctx context.Context, path string) {
@@ -141,6 +150,77 @@ type GPGFile struct {
 	modTime  int64
 }
 
+func (file *GPGFile) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
+	p := file.dataFile
+	fsa, ok := f.(fs.FileSetattrer)
+	if ok && fsa != nil {
+		fsa.Setattr(ctx, in, out)
+	} else {
+		if m, ok := in.GetMode(); ok {
+			if err := syscall.Chmod(p, m); err != nil {
+				return fs.ToErrno(err)
+			}
+		}
+
+		uid, uok := in.GetUID()
+		gid, gok := in.GetGID()
+		if uok || gok {
+			suid := -1
+			sgid := -1
+			if uok {
+				suid = int(uid)
+			}
+			if gok {
+				sgid = int(gid)
+			}
+			if err := syscall.Chown(p, suid, sgid); err != nil {
+				return fs.ToErrno(err)
+			}
+		}
+
+		mtime, mok := in.GetMTime()
+		atime, aok := in.GetATime()
+
+		if mok || aok {
+
+			ap := &atime
+			mp := &mtime
+			if !aok {
+				ap = nil
+			}
+			if !mok {
+				mp = nil
+			}
+			var ts [2]syscall.Timespec
+			ts[0] = fuse.UtimeToTimespec(ap)
+			ts[1] = fuse.UtimeToTimespec(mp)
+
+			if err := syscall.UtimesNano(p, ts[:]); err != nil {
+				return fs.ToErrno(err)
+			}
+		}
+
+		if sz, ok := in.GetSize(); ok {
+			if err := syscall.Truncate(p, int64(sz)); err != nil {
+				return fs.ToErrno(err)
+			}
+		}
+	}
+
+	fga, ok := f.(fs.FileGetattrer)
+	if ok && fga != nil {
+		fga.Getattr(ctx, out)
+	} else {
+		st := syscall.Stat_t{}
+		err := syscall.Lstat(p, &st)
+		if err != nil {
+			return fs.ToErrno(err)
+		}
+		out.FromStat(&st)
+	}
+	return fuse.F_OK
+}
+
 func (file *GPGFile) Fsync(ctx context.Context, f fs.FileHandle, flags uint32) syscall.Errno {
 	log.Println("GPGFile.Fsync")
 	err := file.SaveData()
@@ -160,9 +240,7 @@ func (file *GPGFile) Write(ctx context.Context, f fs.FileHandle, data []byte, of
 	}
 	file.size = len(file.data)
 	file.modTime = time.Now().UnixNano()
-	go func() {
-		file.Fsync(ctx, nil, 0)
-	}()
+	file.Fsync(ctx, nil, 0)
 	return uint32(len(data)), fuse.F_OK
 }
 
@@ -274,4 +352,14 @@ func (file *GPGFile) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
 	out.Blocks = (out.Size + bs - 1) / bs
 
 	return fuse.F_OK
+}
+
+func (G *GPGFS) Unlink(ctx context.Context, name string) syscall.Errno {
+	fmt.Println("GPGFile.Unlink called:", name)
+	path := filepath.Join(G.vault, name)
+	err := syscall.Unlink(path)
+	if err != nil {
+		log.Println(err)
+	}
+	return fs.ToErrno(err)
 }
