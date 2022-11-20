@@ -3,7 +3,6 @@ module github.com/sheik/gpgfs
 go 1.19
 
 require (
-	github.com/blend/go-sdk v1.20220411.3
 	github.com/hanwen/go-fuse/v2 v2.1.0
 	golang.org/x/term v0.0.0-20210927222741-03fcf44c2211
 )
