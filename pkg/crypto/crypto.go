@@ -54,6 +54,24 @@ func NewStreamEncrypter(encKey, macKey []byte, plainText io.Reader) (*StreamEncr
 	}, nil
 }
 
+func NewStreamEncRestore(encKey, macKey []byte, meta StreamMeta, plainText io.Reader) (*StreamEncrypter, error) {
+	block, err := aes.NewCipher(encKey)
+	if err != nil {
+		return nil, ex.New(err)
+	}
+	iv := make([]byte, block.BlockSize())
+	copy(iv, meta.IV)
+	stream := cipher.NewCTR(block, iv)
+	mac := hmac.New(sha256.New, macKey)
+	return &StreamEncrypter{
+		Source: plainText,
+		Block:  block,
+		Stream: stream,
+		Mac:    mac,
+		IV:     iv,
+	}, nil
+}
+
 // NewStreamDecrypter creates a new stream decrypter
 func NewStreamDecrypter(encKey, macKey []byte, meta StreamMeta, cipherText io.Reader) (*StreamDecrypter, error) {
 	block, err := aes.NewCipher(encKey)

@@ -23,9 +23,16 @@ type GPGFile struct {
 
 	dataFile string
 	link     string
-	data     []byte
+	data     Data
 	size     int
 	modTime  int64
+}
+
+type Data struct {
+	unencrypted []byte
+	encrypted   []byte
+	i           int64
+	meta        crypto.StreamMeta
 }
 
 func NewGPGFile(path string, root *GPGFS) *GPGFile {
@@ -104,8 +111,8 @@ func (file *GPGFile) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 }
 
 func (file *GPGFile) Fsync(ctx context.Context, f fs.FileHandle, flags uint32) syscall.Errno {
-	log.Println("GPGFile.Fsync:", file.dataFile)
-	err := file.SaveData()
+	//	log.Println("GPGFile.Fsync:", file.dataFile)
+	err := file.SaveData(false)
 	return fs.ToErrno(err)
 }
 
@@ -114,13 +121,49 @@ func (file *GPGFile) Flush(ctx context.Context, f fs.FileHandle) syscall.Errno {
 	return fuse.F_OK
 }
 
+func (data *Data) Read(p []byte) (n int, err error) {
+	if len(data.unencrypted) == 0 {
+		return 0, nil
+	}
+	if data.i > int64(len(data.unencrypted)) {
+		return 0, nil
+	}
+	n = copy(p, data.unencrypted[data.i:])
+	data.i += int64(n)
+	return
+}
+
 func (file *GPGFile) Write(ctx context.Context, f fs.FileHandle, data []byte, off int64) (written uint32, errno syscall.Errno) {
-	log.Println("Write: ", file.dataFile, off)
+	//	log.Println("Write: ", file.dataFile, off)
+	var err error
+	// might need this
+	//	file.data.unencrypted = file.data.unencrypted[:off]
 
-	file.data = file.data[:off]
+	// need to re-set the encryptor
+	if off == 0 {
+		file.data.i = 0
+		file.data.unencrypted = []byte{}
+		file.data.unencrypted = append(file.data.unencrypted, data...)
+		file.enc, err = crypto.NewStreamEncrypter(file.root.password, file.root.password, &file.data)
+		if err != nil {
+			return 0, fs.ToErrno(err)
+		}
+	} else {
+		if file.enc == nil {
+			// we need to initiate enc and write existing data
+			file.LoadData()
+			file.data.i = 0
+			file.enc, err = crypto.NewStreamEncrypter(file.root.password, file.root.password, &file.data)
+			if err != nil {
+				return 0, fs.ToErrno(err)
+			}
+			// save file, starting from beginning
+			file.SaveData(true)
+		}
+		file.data.unencrypted = append(file.data.unencrypted, data...)
+	}
 
-	file.data = append(file.data, data...)
-	file.size = len(file.data)
+	file.size = len(file.data.unencrypted)
 	file.modTime = time.Now().UnixNano()
 
 	file.Fsync(ctx, nil, 0)
@@ -134,48 +177,48 @@ func (file *GPGFile) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, 
 
 // Read simply returns the data that was already unpacked in the Open call
 func (file *GPGFile) Read(ctx context.Context, f fs.FileHandle, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
-	if file.data == nil {
+	if file.data.unencrypted == nil {
 		file.LoadData()
 	}
 
 	end := int(off) + len(dest)
-	if end > len(file.data) {
-		end = len(file.data)
+	if end > len(file.data.unencrypted) {
+		end = len(file.data.unencrypted)
 	}
 
-	return fuse.ReadResultData(file.data[off:end]), fuse.F_OK
+	return fuse.ReadResultData(file.data.unencrypted[off:end]), fuse.F_OK
 }
 
-func (file *GPGFile) SaveData() error {
-	fileStat, err := os.Stat(file.dataFile)
-	if err != nil {
-		return fs.ToErrno(err)
-	}
-	stat := fileStat.Sys().(*syscall.Stat_t)
-
-	src := bytes.NewReader(file.data)
-	file.enc, err = crypto.NewStreamEncrypter(file.root.password, file.root.password, src)
-	if err != nil {
-		panic(err)
-	}
-
-	encrypted, err := io.ReadAll(file.enc)
-	fmt.Printf("encrypted: %x\n", encrypted)
-
-	err = file.SaveMeta()
-	if err != nil {
-		return err
-	}
-	/*
-		encrypted, err := helper.EncryptMessageArmored(file.root.pubkey, string(file.data))
-		if err != nil {
-			return err
+func (file *GPGFile) SaveData(reset bool) error {
+	buf := make([]byte, 0, 1024)
+	for {
+		if len(buf) == cap(buf) {
+			buf = append(buf, 0)[:len(buf)]
 		}
-	*/
-	err = os.WriteFile(file.dataFile, encrypted, os.FileMode(stat.Mode))
+		n, _ := file.enc.Read(buf[len(buf):cap(buf)])
+		buf = buf[:len(buf)+n]
+		if n == 0 {
+			break
+		}
+	}
+	err := file.SaveMeta()
 	if err != nil {
 		return err
 	}
+
+	flags := syscall.O_CREAT | syscall.O_APPEND | syscall.O_RDWR
+	if reset {
+		flags = syscall.O_CREAT | syscall.O_RDWR
+	}
+
+	fh, err := os.OpenFile(file.dataFile, flags, 0644)
+	if err != nil {
+		return err
+	}
+	defer fh.Close()
+	fh.Write(buf)
+	fh.Sync()
+
 	return nil
 }
 
@@ -225,8 +268,8 @@ func (file *GPGFile) LoadData() error {
 	}
 
 	// save attrs to GPGFile node
-	file.data = unencrypted
-	file.size = len(file.data)
+	file.data.unencrypted = unencrypted
+	file.size = len(file.data.unencrypted)
 	file.modTime = modTime
 
 	return nil
@@ -253,7 +296,7 @@ func (file *GPGFile) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.Att
 		return fs.ToErrno(err)
 	}
 
-	if file.data == nil {
+	if file.data.unencrypted == nil {
 		err = file.LoadData()
 		if err != nil {
 			log.Println("LoadData failed: ", err)
