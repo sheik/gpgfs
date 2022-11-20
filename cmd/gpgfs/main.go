@@ -9,6 +9,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/sheik/gpgfs/pkg/crypto"
 	"github.com/sheik/gpgfs/pkg/gpgfs"
 	"io"
 	"log"
@@ -80,7 +81,10 @@ func main() {
 		passPhrase = string(buf)
 	}
 
-	root, err := gpgfs.NewEncryptedFilesystem(flag.Arg(1), string(pubkey), string(privkey), passPhrase)
+	pass := crypto.StringToKey([]byte(passPhrase))
+	fmt.Printf("key is: %x\n", pass)
+
+	root, err := gpgfs.NewEncryptedFilesystem(flag.Arg(1), string(pubkey), string(privkey), pass)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "NewGPGFS failed: %v\n", err)
 		os.Exit(1)

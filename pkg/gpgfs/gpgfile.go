@@ -3,7 +3,8 @@ package gpgfs
 import (
 	"bytes"
 	"context"
-	"github.com/ProtonMail/gopenpgp/v2/helper"
+	"encoding/gob"
+	"fmt"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/sheik/gpgfs/pkg/crypto"
@@ -114,24 +115,9 @@ func (file *GPGFile) Flush(ctx context.Context, f fs.FileHandle) syscall.Errno {
 }
 
 func (file *GPGFile) Write(ctx context.Context, f fs.FileHandle, data []byte, off int64) (written uint32, errno syscall.Errno) {
-	var err error
 	log.Println("Write: ", file.dataFile, off)
 
 	file.data = file.data[:off]
-
-	if file.enc == nil {
-		encKey := []byte(file.root.password)
-		macKey := []byte(file.root.password)
-		src := bytes.NewReader(file.data)
-		file.enc, err = crypto.NewStreamEncrypter(encKey, macKey, src)
-		if err != nil {
-			panic(err)
-		}
-	}
-
-	encrypted, err := io.ReadAll(file.enc)
-
-	file.enc.Read()
 
 	file.data = append(file.data, data...)
 	file.size = len(file.data)
@@ -167,11 +153,42 @@ func (file *GPGFile) SaveData() error {
 	}
 	stat := fileStat.Sys().(*syscall.Stat_t)
 
-	encrypted, err := helper.EncryptMessageArmored(file.root.pubkey, string(file.data))
+	src := bytes.NewReader(file.data)
+	file.enc, err = crypto.NewStreamEncrypter(file.root.password, file.root.password, src)
+	if err != nil {
+		panic(err)
+	}
+
+	encrypted, err := io.ReadAll(file.enc)
+	fmt.Printf("encrypted: %x\n", encrypted)
+
+	err = file.SaveMeta()
 	if err != nil {
 		return err
 	}
-	err = os.WriteFile(file.dataFile, []byte(encrypted), os.FileMode(stat.Mode))
+	/*
+		encrypted, err := helper.EncryptMessageArmored(file.root.pubkey, string(file.data))
+		if err != nil {
+			return err
+		}
+	*/
+	err = os.WriteFile(file.dataFile, encrypted, os.FileMode(stat.Mode))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (file *GPGFile) SaveMeta() error {
+	meta := file.enc.Meta()
+	fmt.Printf("meta: %+v\n", meta)
+	var buffer bytes.Buffer
+	enc := gob.NewEncoder(&buffer)
+	err := enc.Encode(meta)
+	if err != nil {
+		return err
+	}
+	err = os.WriteFile(file.dataFile+".meta", buffer.Bytes(), 0600)
 	if err != nil {
 		return err
 	}
@@ -191,21 +208,40 @@ func (file *GPGFile) LoadData() error {
 		return err
 	}
 
-	unencrypted := ""
+	var unencrypted []byte
 	if string(encrypted) != "" {
-		// decrypt
-		unencrypted, err = helper.DecryptMessageArmored(file.root.privkey, []byte(file.root.password), string(encrypted))
-		if err != nil {
-			return err
+		meta := file.GetMeta()
+		if meta != nil {
+			file.dec, err = crypto.NewStreamDecrypter(file.root.password, file.root.password, *meta, bytes.NewReader(encrypted))
+			if err != nil {
+				return err
+			}
+			// decrypt
+			unencrypted, err = io.ReadAll(file.dec)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
 	// save attrs to GPGFile node
-	file.data = []byte(unencrypted)
+	file.data = unencrypted
 	file.size = len(file.data)
 	file.modTime = modTime
 
 	return nil
+}
+
+func (file *GPGFile) GetMeta() *crypto.StreamMeta {
+	filenameFile := file.dataFile + ".meta"
+	buf, err := os.ReadFile(filenameFile)
+	if err != nil {
+		return nil
+	}
+	dec := gob.NewDecoder(bytes.NewReader(buf))
+	var meta crypto.StreamMeta
+	dec.Decode(&meta)
+	return &meta
 }
 
 // Getattr sets the minimum, which is the size. A more full-featured

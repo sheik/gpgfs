@@ -1,15 +1,19 @@
 package gpgfs
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/gob"
 	"fmt"
-	"github.com/ProtonMail/gopenpgp/v2/helper"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
+	"github.com/sheik/gpgfs/pkg/crypto"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -24,7 +28,7 @@ type GPGFS struct {
 	vault    string
 	pubkey   string
 	privkey  string
-	password string
+	password []byte
 
 	nodes map[string]*GPGFile
 	dirs  map[string]*GPGFS
@@ -62,14 +66,49 @@ func (G *GPGFS) SaveName(name string) string {
 	}
 	defer fp.Close()
 
-	encrypted, err := helper.EncryptMessageArmored(G.pubkey, string(name))
+	enc, err := crypto.NewStreamEncrypter(G.password, G.password, strings.NewReader(name))
+	if err != nil {
+		panic(err)
+	}
+	encrypted, err := io.ReadAll(enc)
 	if err != nil {
 		panic(err)
 	}
 
-	fp.WriteString(encrypted)
+	fp.Write(encrypted)
+
+	err = SaveMeta(filenameFile+".meta", enc.Meta())
+	if err != nil {
+		panic(err)
+	}
 
 	return id
+}
+
+func SaveMeta(filename string, meta crypto.StreamMeta) error {
+	var buffer bytes.Buffer
+	enc := gob.NewEncoder(&buffer)
+	err := enc.Encode(meta)
+	if err != nil {
+		return err
+	}
+	err = os.WriteFile(filename, buffer.Bytes(), 0600)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func GetMeta(id string) crypto.StreamMeta {
+	filenameFile := filepath.Join(VAULT, ".db", id+".meta")
+	buf, err := os.ReadFile(filenameFile)
+	if err != nil {
+		panic(err)
+	}
+	dec := gob.NewDecoder(bytes.NewReader(buf))
+	var meta crypto.StreamMeta
+	dec.Decode(&meta)
+	return meta
 }
 
 func (G *GPGFS) GetName(id string) string {
@@ -78,11 +117,24 @@ func (G *GPGFS) GetName(id string) string {
 	if err != nil {
 		panic(err)
 	}
-	unencrypted, err := helper.DecryptMessageArmored(G.privkey, []byte(G.password), string(buf))
+
+	log.Printf("password is: %x\n", G.password)
+
+	meta := GetMeta(id)
+
+	fmt.Printf("meta: %+v\n", meta)
+	dec, err := crypto.NewStreamDecrypter(G.password, G.password, meta, bytes.NewReader(buf))
 	if err != nil {
 		panic(err)
 	}
-	return unencrypted
+	unencrypted, err := io.ReadAll(dec)
+	/*
+		unencrypted, err := helper.DecryptMessageArmored(G.privkey, []byte(G.password), string(buf))
+	*/
+	if err != nil {
+		panic(err)
+	}
+	return string(unencrypted)
 }
 
 func (G *GPGFS) Create(ctx context.Context, name string, flags uint32, mode uint32, out *fuse.EntryOut) (node *fs.Inode, fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
@@ -149,6 +201,11 @@ func (G *GPGFS) Rename(ctx context.Context, name string, newParent fs.InodeEmbed
 		return fs.ToErrno(err)
 	}
 
+	err = os.Rename(oldPath+".meta", newPath+".meta")
+	if err != nil {
+		return fs.ToErrno(err)
+	}
+
 	if G.GetChild(name).IsDir() {
 		G.dirs[name].vault = newPath
 		G.dirs[newName] = G.dirs[name]
@@ -163,16 +220,17 @@ func (G *GPGFS) Rename(ctx context.Context, name string, newParent fs.InodeEmbed
 	return syscall.F_OK
 }
 
-func NewEncryptedFilesystem(vault, pubkey, privkey, password string) (*GPGFS, error) {
+func NewEncryptedFilesystem(vault, pubkey, privkey string, password []byte) (*GPGFS, error) {
 	VAULT = vault
 	path := filepath.Join(VAULT, ".db")
 	os.Mkdir(path, 0700)
+	log.Printf("password is: %x\n", password)
 
 	return NewGPGFS(vault, pubkey, privkey, password)
 }
 
-func NewGPGFS(vault, pubkey, privkey, password string) (*GPGFS, error) {
-	if privkey == "" || pubkey == "" || password == "" {
+func NewGPGFS(vault, pubkey, privkey string, password []byte) (*GPGFS, error) {
+	if privkey == "" || pubkey == "" || len(password) != crypto.DefaultKeySize {
 		return nil, fmt.Errorf("private key, public key, and password are required")
 	}
 	return &GPGFS{vault: vault, pubkey: pubkey, privkey: privkey, password: password, nodes: make(map[string]*GPGFile), dirs: make(map[string]*GPGFS)}, nil
@@ -186,6 +244,9 @@ func (G *GPGFS) OnAdd(ctx context.Context) {
 	}
 	for _, node := range nodes {
 		if node.Name() == ".db" {
+			continue
+		}
+		if filepath.Ext(node.Name()) == ".meta" {
 			continue
 		}
 		name := G.GetName(node.Name())

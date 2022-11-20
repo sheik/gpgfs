@@ -160,6 +160,11 @@ type StreamMeta struct {
 	Hash []byte
 }
 
+func StringToKey(input []byte) []byte {
+	key := sha256.Sum256(input)
+	return key[:]
+}
+
 // MustCreateKey creates a key, if an error is returned, it panics.
 func MustCreateKey(keySize int) []byte {
 	key, err := CreateKey(keySize)
