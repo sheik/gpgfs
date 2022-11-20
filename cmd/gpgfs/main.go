@@ -35,7 +35,7 @@ func main() {
 	privKey := flag.String("privkey", "", "path to private gpg key")
 	flag.Parse()
 	if flag.NArg() < 2 {
-		fmt.Fprintf(os.Stderr, "usage: %s MOUNTPOINT ZIP-FILE\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "usage: %s -privkey privkey.pgp -pubkey pubkey.pgp MOUNTPOINT VAULT-DIR\n", os.Args[0])
 		os.Exit(2)
 	}
 
