@@ -35,7 +35,7 @@ func main() {
 	privKey := flag.String("privkey", "", "path to private gpg key")
 	flag.Parse()
 	if flag.NArg() < 2 {
-		fmt.Fprintf(os.Stderr, "usage: %s -privkey privkey.gpg -pubkey pubkey.gpg MOUNTPOINT VAULT\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "usage: %s -privkey privkey.pgp -pubkey pubkey.pgp MOUNTPOINT VAULT-DIR\n", os.Args[0])
 		os.Exit(2)
 	}
 
@@ -53,9 +53,6 @@ func main() {
 			log.Fatalf("os.Create: %v", err)
 		}
 	}
-	/*
-
-	 */
 	pubkey, err := os.ReadFile(*pubKey)
 	if err != nil {
 		panic(err)
@@ -65,6 +62,14 @@ func main() {
 		panic(err)
 	}
 	passPhrase := os.Getenv("PASSPHRASE")
+	if passPhrase == "" {
+		fmt.Print("Enter GPG passphrase: ")
+		buf, err := term.ReadPassword(syscall.Stdin)
+		if err != nil {
+			panic(err)
+		}
+		passPhrase = string(buf)
+	}
 
 	if passPhrase == "" {
 		fmt.Print("Enter GPG passphrase: ")
