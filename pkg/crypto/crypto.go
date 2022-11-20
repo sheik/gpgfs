@@ -1,6 +1,10 @@
 /*
 Copyright (c) 2022 - Present. Blend Labs, Inc. All rights reserved
 Use of this source code is governed by a MIT license that can be found in the LICENSE file.
+
+modifications:
+This library has been condensed to only parts needed for encryption / decryption of streams
+Removed dependency on the ex package
 */
 
 package crypto
@@ -11,13 +15,11 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
+	"fmt"
 	"hash"
 	"io"
 
 	cryptorand "crypto/rand"
-	"github.com/blend/go-sdk/ex"
 )
 
 // Important constants.
@@ -36,31 +38,13 @@ const (
 func NewStreamEncrypter(encKey, macKey []byte, plainText io.Reader) (*StreamEncrypter, error) {
 	block, err := aes.NewCipher(encKey)
 	if err != nil {
-		return nil, ex.New(err)
+		return nil, err
 	}
 	iv := make([]byte, block.BlockSize())
 	_, err = rand.Read(iv)
 	if err != nil {
-		return nil, ex.New(err)
+		return nil, err
 	}
-	stream := cipher.NewCTR(block, iv)
-	mac := hmac.New(sha256.New, macKey)
-	return &StreamEncrypter{
-		Source: plainText,
-		Block:  block,
-		Stream: stream,
-		Mac:    mac,
-		IV:     iv,
-	}, nil
-}
-
-func NewStreamEncRestore(encKey, macKey []byte, meta StreamMeta, plainText io.Reader) (*StreamEncrypter, error) {
-	block, err := aes.NewCipher(encKey)
-	if err != nil {
-		return nil, ex.New(err)
-	}
-	iv := make([]byte, block.BlockSize())
-	copy(iv, meta.IV)
 	stream := cipher.NewCTR(block, iv)
 	mac := hmac.New(sha256.New, macKey)
 	return &StreamEncrypter{
@@ -76,7 +60,7 @@ func NewStreamEncRestore(encKey, macKey []byte, meta StreamMeta, plainText io.Re
 func NewStreamDecrypter(encKey, macKey []byte, meta StreamMeta, cipherText io.Reader) (*StreamDecrypter, error) {
 	block, err := aes.NewCipher(encKey)
 	if err != nil {
-		return nil, ex.New(err)
+		return nil, err
 	}
 	stream := cipher.NewCTR(block, meta.IV)
 	mac := hmac.New(sha256.New, macKey)
@@ -114,7 +98,7 @@ func (s *StreamEncrypter) Read(p []byte) (int, error) {
 		s.Stream.XORKeyStream(p[:n], p[:n])
 		err := writeHash(s.Mac, p[:n])
 		if err != nil {
-			return n, ex.New(err)
+			return n, err
 		}
 		return n, readErr
 	}
@@ -132,7 +116,7 @@ func (s *StreamDecrypter) Read(p []byte) (int, error) {
 	if n > 0 {
 		err := writeHash(s.Mac, p[:n])
 		if err != nil {
-			return n, ex.New(err)
+			return n, err
 		}
 		s.Stream.XORKeyStream(p[:n], p[:n])
 		return n, readErr
@@ -143,7 +127,7 @@ func (s *StreamDecrypter) Read(p []byte) (int, error) {
 // Authenticate verifys that the hash of the stream is correct. This should only be called after processing is finished
 func (s *StreamDecrypter) Authenticate() error {
 	if !hmac.Equal(s.Meta.Hash, s.Mac.Sum(nil)) {
-		return ex.New("authentication failed")
+		return fmt.Errorf("authentication failed")
 	}
 	return nil
 }
@@ -151,10 +135,10 @@ func (s *StreamDecrypter) Authenticate() error {
 func writeHash(mac hash.Hash, p []byte) error {
 	m, err := mac.Write(p)
 	if err != nil {
-		return ex.New(err)
+		return err
 	}
 	if m != len(p) {
-		return ex.New("could not write all bytes to hmac")
+		return fmt.Errorf("could not write all bytes to hmac")
 	}
 	return nil
 }
@@ -162,10 +146,10 @@ func writeHash(mac hash.Hash, p []byte) error {
 func checkedWrite(dst io.Writer, p []byte) (int, error) {
 	n, err := dst.Write(p)
 	if err != nil {
-		return n, ex.New(err)
+		return n, err
 	}
 	if n != len(p) {
-		return n, ex.New("unable to write all bytes")
+		return n, fmt.Errorf("unable to write all bytes")
 	}
 	return len(p), nil
 }
@@ -183,15 +167,6 @@ func StringToKey(input []byte) []byte {
 	return key[:]
 }
 
-// MustCreateKey creates a key, if an error is returned, it panics.
-func MustCreateKey(keySize int) []byte {
-	key, err := CreateKey(keySize)
-	if err != nil {
-		panic(err)
-	}
-	return key
-}
-
 // CreateKey creates a key of a given size by reading that much data off the crypto/rand reader.
 func CreateKey(keySize int) ([]byte, error) {
 	key := make([]byte, keySize)
@@ -200,44 +175,4 @@ func CreateKey(keySize int) ([]byte, error) {
 		return nil, err
 	}
 	return key, nil
-}
-
-// MustCreateKeyString generates a new key and returns it as a hex string.
-func MustCreateKeyString(keySize int) string {
-	return hex.EncodeToString(MustCreateKey(keySize))
-}
-
-// MustCreateKeyBase64String generates a new key and returns it as a base64 std encoding string.
-func MustCreateKeyBase64String(keySize int) string {
-	return base64.StdEncoding.EncodeToString(MustCreateKey(keySize))
-}
-
-// CreateKeyString generates a new key and returns it as a hex string.
-func CreateKeyString(keySize int) (string, error) {
-	key, err := CreateKey(keySize)
-	if err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(key), nil
-}
-
-// CreateKeyBase64String generates a new key and returns it as a base64 std encoding string.
-func CreateKeyBase64String(keySize int) (string, error) {
-	key, err := CreateKey(keySize)
-	if err != nil {
-		return "", err
-	}
-	return base64.StdEncoding.EncodeToString(key), nil
-}
-
-// ParseKey parses a key from a string.
-func ParseKey(key string) ([]byte, error) {
-	decoded, err := hex.DecodeString(key)
-	if err != nil {
-		return nil, ex.New(err)
-	}
-	if len(decoded) != DefaultKeySize {
-		return nil, ex.New("parse key; invalid key length")
-	}
-	return decoded, nil
 }

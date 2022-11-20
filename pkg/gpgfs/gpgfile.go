@@ -7,7 +7,6 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/gob"
-	"fmt"
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/sheik/gpgfs/pkg/crypto"
@@ -114,13 +113,11 @@ func (file *GPGFile) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetA
 }
 
 func (file *GPGFile) Fsync(ctx context.Context, f fs.FileHandle, flags uint32) syscall.Errno {
-	//	log.Println("GPGFile.Fsync:", file.dataFile)
 	err := file.SaveData(false)
 	return fs.ToErrno(err)
 }
 
 func (file *GPGFile) Flush(ctx context.Context, f fs.FileHandle) syscall.Errno {
-	log.Println("GPGFile.Flush called:", file.dataFile)
 	return fuse.F_OK
 }
 
@@ -137,7 +134,6 @@ func (data *Data) Read(p []byte) (n int, err error) {
 }
 
 func (file *GPGFile) Write(ctx context.Context, f fs.FileHandle, data []byte, off int64) (written uint32, errno syscall.Errno) {
-	//	log.Println("Write: ", file.dataFile, off)
 	var err error
 	// might need this
 	//	file.data.unencrypted = file.data.unencrypted[:off]
@@ -174,7 +170,6 @@ func (file *GPGFile) Write(ctx context.Context, f fs.FileHandle, data []byte, of
 }
 
 func (file *GPGFile) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
-	log.Printf("GPGFile.Open: %s %x", file.dataFile, fuseFlags)
 	return nil, fuse.FOPEN_KEEP_CACHE, fuse.F_OK
 }
 
@@ -227,7 +222,6 @@ func (file *GPGFile) SaveData(reset bool) error {
 
 func (file *GPGFile) SaveMeta() error {
 	meta := file.enc.Meta()
-	fmt.Printf("meta: %+v\n", meta)
 	var buffer bytes.Buffer
 	enc := gob.NewEncoder(&buffer)
 	err := enc.Encode(meta)
@@ -314,14 +308,12 @@ func (file *GPGFile) GetMeta() *crypto.StreamMeta {
 	dec := gob.NewDecoder(bytes.NewReader(buf))
 	var meta crypto.StreamMeta
 	dec.Decode(&meta)
-	fmt.Printf("read meta: %+v", meta)
 	return &meta
 }
 
 // Getattr sets the minimum, which is the size. A more full-featured
 // FS would also set timestamps and permissions.
 func (file *GPGFile) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
-	log.Println("Getattr called:", file.dataFile)
 	fileStat, err := os.Stat(file.dataFile)
 	if err != nil {
 		return fs.ToErrno(err)
