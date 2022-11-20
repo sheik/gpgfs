@@ -17,9 +17,11 @@ import (
 	"runtime"
 	"runtime/pprof"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/hanwen/go-fuse/v2/fs"
+	"golang.org/x/term"
 )
 
 func main() {
@@ -33,7 +35,7 @@ func main() {
 	privKey := flag.String("privkey", "", "path to private gpg key")
 	flag.Parse()
 	if flag.NArg() < 2 {
-		fmt.Fprintf(os.Stderr, "usage: %s MOUNTPOINT ZIP-FILE\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "usage: %s -privkey privkey.gpg -pubkey pubkey.gpg MOUNTPOINT VAULT\n", os.Args[0])
 		os.Exit(2)
 	}
 
@@ -52,12 +54,8 @@ func main() {
 		}
 	}
 	/*
-		fmt.Print("Enter GPG passphrase: ")
-		passPhrase, err := term.ReadPassword(syscall.Stdin)
-		if err != nil {
-			panic(err)
-		}
-	*/
+
+	 */
 	pubkey, err := os.ReadFile(*pubKey)
 	if err != nil {
 		panic(err)
@@ -67,6 +65,15 @@ func main() {
 		panic(err)
 	}
 	passPhrase := os.Getenv("PASSPHRASE")
+
+	if passPhrase == "" {
+		fmt.Print("Enter GPG passphrase: ")
+		buf, err := term.ReadPassword(syscall.Stdin)
+		if err != nil {
+			panic(err)
+		}
+		passPhrase = string(buf)
+	}
 
 	root, err := gpgfs.NewEncryptedFilesystem(flag.Arg(1), string(pubkey), string(privkey), passPhrase)
 	if err != nil {
