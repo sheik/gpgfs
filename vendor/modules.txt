@@ -48,7 +48,6 @@ github.com/cloudflare/circl/sign/ed448
 github.com/hanwen/go-fuse/v2/fs
 github.com/hanwen/go-fuse/v2/fuse
 github.com/hanwen/go-fuse/v2/internal
-github.com/hanwen/go-fuse/v2/internal/testutil
 github.com/hanwen/go-fuse/v2/internal/utimens
 github.com/hanwen/go-fuse/v2/splice
 # github.com/konsorten/go-windows-terminal-sequences v1.0.1
@@ -67,7 +66,12 @@ golang.org/x/crypto/cast5
 ## explicit; go 1.17
 golang.org/x/sys/cpu
 golang.org/x/sys/internal/unsafeheader
+golang.org/x/sys/plan9
 golang.org/x/sys/unix
+golang.org/x/sys/windows
+# golang.org/x/term v0.0.0-20201126162022-7de9c90e9dd1
+## explicit; go 1.11
+golang.org/x/term
 # golang.org/x/text v0.3.3
 ## explicit; go 1.11
 golang.org/x/text/encoding
