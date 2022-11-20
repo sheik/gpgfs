@@ -3,6 +3,9 @@ package gpgfs
 import (
 	"bytes"
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
 	"encoding/gob"
 	"fmt"
 	"github.com/hanwen/go-fuse/v2/fs"
@@ -231,7 +234,22 @@ func (file *GPGFile) SaveMeta() error {
 	if err != nil {
 		return err
 	}
-	err = os.WriteFile(file.dataFile+".meta", buffer.Bytes(), 0600)
+
+	block, err := aes.NewCipher(file.root.password)
+	if err != nil {
+		return err
+	}
+	cipherText := make([]byte, block.BlockSize()+buffer.Len())
+	iv := cipherText[:block.BlockSize()]
+
+	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+		return err
+	}
+
+	stream := cipher.NewCFBEncrypter(block, iv)
+	stream.XORKeyStream(cipherText[block.BlockSize():], buffer.Bytes())
+
+	err = os.WriteFile(file.dataFile+".meta", cipherText, 0600)
 	if err != nil {
 		return err
 	}
@@ -281,9 +299,22 @@ func (file *GPGFile) GetMeta() *crypto.StreamMeta {
 	if err != nil {
 		return nil
 	}
+
+	block, err := aes.NewCipher(file.root.password)
+	if err != nil {
+		panic(err)
+	}
+
+	iv := buf[:block.BlockSize()]
+	buf = buf[block.BlockSize():]
+
+	stream := cipher.NewCFBDecrypter(block, iv)
+	stream.XORKeyStream(buf, buf)
+
 	dec := gob.NewDecoder(bytes.NewReader(buf))
 	var meta crypto.StreamMeta
 	dec.Decode(&meta)
+	fmt.Printf("read meta: %+v", meta)
 	return &meta
 }
 

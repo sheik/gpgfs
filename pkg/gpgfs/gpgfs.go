@@ -3,6 +3,9 @@ package gpgfs
 import (
 	"bytes"
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/gob"
 	"fmt"
@@ -77,7 +80,7 @@ func (G *GPGFS) SaveName(name string) string {
 
 	fp.Write(encrypted)
 
-	err = SaveMeta(filenameFile+".meta", enc.Meta())
+	err = G.SaveMeta(filenameFile+".meta", enc.Meta())
 	if err != nil {
 		panic(err)
 	}
@@ -85,26 +88,52 @@ func (G *GPGFS) SaveName(name string) string {
 	return id
 }
 
-func SaveMeta(filename string, meta crypto.StreamMeta) error {
+func (G *GPGFS) SaveMeta(filename string, meta crypto.StreamMeta) error {
 	var buffer bytes.Buffer
 	enc := gob.NewEncoder(&buffer)
 	err := enc.Encode(meta)
 	if err != nil {
 		return err
 	}
-	err = os.WriteFile(filename, buffer.Bytes(), 0600)
+	block, err := aes.NewCipher(G.password)
+	if err != nil {
+		return err
+	}
+	cipherText := make([]byte, block.BlockSize()+buffer.Len())
+	iv := cipherText[:block.BlockSize()]
+
+	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+		return err
+	}
+
+	stream := cipher.NewCFBEncrypter(block, iv)
+	stream.XORKeyStream(cipherText[block.BlockSize():], buffer.Bytes())
+
+	err = os.WriteFile(filename, cipherText, 0600)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func GetMeta(id string) crypto.StreamMeta {
+func (G *GPGFS) GetMeta(id string) crypto.StreamMeta {
 	filenameFile := filepath.Join(VAULT, ".db", id+".meta")
 	buf, err := os.ReadFile(filenameFile)
 	if err != nil {
 		panic(err)
 	}
+
+	block, err := aes.NewCipher(G.password)
+	if err != nil {
+		panic(err)
+	}
+
+	iv := buf[:block.BlockSize()]
+	buf = buf[block.BlockSize():]
+
+	stream := cipher.NewCFBDecrypter(block, iv)
+	stream.XORKeyStream(buf, buf)
+
 	dec := gob.NewDecoder(bytes.NewReader(buf))
 	var meta crypto.StreamMeta
 	dec.Decode(&meta)
@@ -120,7 +149,7 @@ func (G *GPGFS) GetName(id string) string {
 
 	log.Printf("password is: %x\n", G.password)
 
-	meta := GetMeta(id)
+	meta := G.GetMeta(id)
 
 	fmt.Printf("meta: %+v\n", meta)
 	dec, err := crypto.NewStreamDecrypter(G.password, G.password, meta, bytes.NewReader(buf))
