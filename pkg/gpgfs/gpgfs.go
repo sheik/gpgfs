@@ -35,6 +35,77 @@ type GPGFS struct {
 	dirs  map[string]*GPGFS
 }
 
+func (G *GPGFS) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
+	p := G.vault
+	fsa, ok := f.(fs.FileSetattrer)
+	if ok && fsa != nil {
+		fsa.Setattr(ctx, in, out)
+	} else {
+		if m, ok := in.GetMode(); ok {
+			if err := syscall.Chmod(p, m); err != nil {
+				return fs.ToErrno(err)
+			}
+		}
+
+		uid, uok := in.GetUID()
+		gid, gok := in.GetGID()
+		if uok || gok {
+			suid := -1
+			sgid := -1
+			if uok {
+				suid = int(uid)
+			}
+			if gok {
+				sgid = int(gid)
+			}
+			if err := syscall.Chown(p, suid, sgid); err != nil {
+				return fs.ToErrno(err)
+			}
+		}
+
+		mtime, mok := in.GetMTime()
+		atime, aok := in.GetATime()
+
+		if mok || aok {
+
+			ap := &atime
+			mp := &mtime
+			if !aok {
+				ap = nil
+			}
+			if !mok {
+				mp = nil
+			}
+			var ts [2]syscall.Timespec
+			ts[0] = fuse.UtimeToTimespec(ap)
+			ts[1] = fuse.UtimeToTimespec(mp)
+
+			if err := syscall.UtimesNano(p, ts[:]); err != nil {
+				return fs.ToErrno(err)
+			}
+		}
+
+		if sz, ok := in.GetSize(); ok {
+			if err := syscall.Truncate(p, int64(sz)); err != nil {
+				return fs.ToErrno(err)
+			}
+		}
+	}
+
+	fga, ok := f.(fs.FileGetattrer)
+	if ok && fga != nil {
+		fga.Getattr(ctx, out)
+	} else {
+		st := syscall.Stat_t{}
+		err := syscall.Lstat(p, &st)
+		if err != nil {
+			return fs.ToErrno(err)
+		}
+		out.FromStat(&st)
+	}
+	return fuse.F_OK
+}
+
 func (G *GPGFS) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	id := G.SaveName(name)
 	path := filepath.Join(G.vault, name)
@@ -277,7 +348,7 @@ func (G *GPGFS) AddDir(ctx context.Context, path string) *GPGFS {
 	id := G.SaveName(name)
 	dir, _ := NewGPGFS(filepath.Join(G.vault, id), G.password)
 	G.dirs[filepath.Base(path)] = dir
-	ch := G.NewPersistentInode(ctx, dir, fs.StableAttr{Mode: fuse.S_IFDIR})
+	ch := G.NewPersistentInode(ctx, dir, fs.StableAttr{Mode: fuse.S_IFDIR | 0755})
 	ok := G.AddChild(name, ch, true)
 	if !ok {
 		panic("could not add child")
